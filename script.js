@@ -1,66 +1,103 @@
-// Inicialización de la cámara
-async function startVideo() {
-    const video = document.getElementById('video');
-    const stream = await navigator.mediaDevices.getUserMedia({
-        video: {}
-    });
-    video.srcObject = stream;
-}
+let stream;
+let videoElement = document.getElementById('video');
+let canvasElement = document.getElementById('canvas');
+let alumnosReconocidos = [];
+let alumnosLista = document.getElementById('alumnosLista');
+let contexto = canvasElement.getContext('2d');
+let currentStream = null;  // Variable para almacenar el flujo actual de la cámara
+let currentDeviceId = null; // ID de la cámara actual (delantera o trasera)
 
 // Cargar los modelos de face-api.js
 async function cargarModelos() {
-    await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
-    await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-    await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+    try {
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+        console.log("Modelos cargados correctamente.");
+    } catch (error) {
+        console.error("Error al cargar los modelos:", error);
+    }
+}
+
+// Función para iniciar la cámara
+async function iniciarCamara() {
+    const constraints = {
+        video: {
+            facingMode: currentDeviceId ? (currentDeviceId === 'user' ? 'user' : 'environment') : 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+        }
+    };
+
+    try {
+        // Detener el flujo anterior si existe
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+
+        // Obtener el flujo de la cámara
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoElement.srcObject = stream;
+
+        // Mostrar el canvas encima del video
+        canvasElement.width = videoElement.width;
+        canvasElement.height = videoElement.height;
+    } catch (err) {
+        console.error('Error al acceder a la cámara: ', err);
+    }
+}
+
+// Función para alternar la cámara
+function alternarCamara() {
+    currentDeviceId = currentDeviceId === 'user' ? 'environment' : 'user';
+    iniciarCamara();
 }
 
 // Función para tomar una foto
 async function tomarFoto() {
-    const video = document.getElementById('video');
-    const detecciones = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+    if (!faceapi) {
+        console.error('face-api.js no está cargado.');
+        return;
+    }
 
-    if (detecciones.length > 0) {
-        // Lista de alumnos detectados
-        const listaAlumnos = document.getElementById('alumnos-lista');
-        detecciones.forEach(deteccion => {
-            const alumno = {
-                descriptor: deteccion.descriptor,
-                nombre: 'Alumno Detectado' // Aquí puedes asignar un nombre o ID si lo deseas
-            };
+    // Asegúrate de que el video esté listo
+    if (videoElement.srcObject) {
+        // Esperamos a que el video se cargue
+        const detecciones = await faceapi.detectAllFaces(videoElement)
+            .withFaceLandmarks()
+            .withFaceDescriptors();
 
-            // Aquí se puede almacenar el descriptor facial en una base de datos o localStorage
-            // Ejemplo en localStorage:
-            localStorage.setItem(alumno.nombre, JSON.stringify(alumno));
-
-            // Agregar a la lista de alumnos en la interfaz
-            const nuevoAlumno = document.createElement('li');
-            nuevoAlumno.textContent = alumno.nombre;
-            listaAlumnos.appendChild(nuevoAlumno);
-        });
+        if (detecciones.length > 0) {
+            console.log(`Rostros detectados: ${detecciones.length}`);
+            procesarRostros(detecciones);
+        } else {
+            console.log("No se detectaron rostros.");
+        }
+    } else {
+        console.error("No se ha iniciado el video.");
     }
 }
 
-// Función para reconocer alumnos al escanear de nuevo
-async function reconocerAlumnos() {
-    const video = document.getElementById('video');
-    const detecciones = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
-
-    // Recuperar los descriptores de los alumnos guardados
-    const alumnosGuardados = Object.keys(localStorage).map(key => {
-        return JSON.parse(localStorage.getItem(key));
-    });
-
-    // Comparar los descriptores de los rostros detectados con los almacenados
+// Procesar los rostros detectados
+function procesarRostros(detecciones) {
     detecciones.forEach(deteccion => {
-        const resultado = faceapi.similarity(deteccion.descriptor, alumnosGuardados[0].descriptor);
-        if (resultado > 0.6) { // Umbral de confianza para considerar que es el mismo rostro
-            console.log('Alumno presente:', alumnosGuardados[0].nombre);
-        } else {
-            console.log('Rostro no reconocido');
-        }
+        const alumno = deteccion.descriptor;
+        const nombreAlumno = 'Alumno_' + alumnosReconocidos.length + 1;  // Simulación de nombre
+        alumnosReconocidos.push({ nombre: nombreAlumno, descriptor: alumno });
+
+        // Mostrar el nombre en la lista
+        const li = document.createElement('li');
+        li.textContent = nombreAlumno;
+        alumnosLista.appendChild(li);
     });
 }
 
-// Iniciar la cámara y cargar modelos
-startVideo();
-cargarModelos();
+// Asociar los eventos a los botones
+document.getElementById('cargarModelos').addEventListener('click', cargarModelos);
+document.getElementById('tomarFoto').addEventListener('click', tomarFoto);
+document.getElementById('alternarCamara').addEventListener('click', alternarCamara);
+
+// Iniciar la cámara al cargar la página
+window.onload = () => {
+    cargarModelos().then(iniciarCamara);
+};
